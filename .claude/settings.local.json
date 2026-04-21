@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 \"C:/Users/julio/.claude/skills/ui-ux-pro-max/scripts/search.py\" \"fintech business cash flow management SaaS professional\" --design-system -p \"Caixa\" -f markdown)",
+      "Bash(python3 \"C:/Users/julio/.claude/skills/ui-ux-pro-max/scripts/search.py\" \"fintech business cash flow management SaaS professional\" --design-system -p \"Caixa\")"
+    ]
+  }
+}
