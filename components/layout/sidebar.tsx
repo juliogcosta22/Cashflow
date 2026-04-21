@@ -10,6 +10,8 @@ import {
   LogOut,
   Building2,
   X,
+  ShoppingCart,
+  BarChart2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -17,7 +19,12 @@ import { useRouter } from "next/navigation";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/caixa", label: "Caixa", icon: Wallet },
+  { href: "/pdv", label: "PDV", icon: ShoppingCart, highlight: true },
+];
+
+const secondaryItems = [
+  { href: "/fluxo", label: "Fluxo de Caixa", icon: BarChart2 },
+  { href: "/caixa", label: "Caixa Manual", icon: Wallet },
   { href: "/estoque", label: "Estoque", icon: Package },
   { href: "/precificacao", label: "Precificação", icon: Calculator },
 ];
@@ -39,9 +46,12 @@ export function Sidebar({ companyName, mobileOpen, onMobileClose }: SidebarProps
     router.refresh();
   }
 
+  function isActive(href: string) {
+    return href === "/" ? pathname === "/" : pathname.startsWith(href);
+  }
+
   return (
     <>
-      {/* Mobile overlay */}
       {mobileOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 lg:hidden"
@@ -50,7 +60,6 @@ export function Sidebar({ companyName, mobileOpen, onMobileClose }: SidebarProps
         />
       )}
 
-      {/* Sidebar panel */}
       <aside
         className={cn(
           "fixed top-0 left-0 h-full w-60 z-50 flex flex-col bg-[var(--color-sidebar-bg)] transition-transform duration-200",
@@ -58,7 +67,7 @@ export function Sidebar({ companyName, mobileOpen, onMobileClose }: SidebarProps
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        {/* Logo / Company */}
+        {/* Logo */}
         <div className="flex items-center justify-between px-5 h-16 border-b border-white/10">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-8 h-8 rounded-[var(--radius-md)] bg-[var(--color-primary)] flex items-center justify-center flex-shrink-0">
@@ -75,10 +84,10 @@ export function Sidebar({ companyName, mobileOpen, onMobileClose }: SidebarProps
           </button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5" aria-label="Navegação principal">
-          {navItems.map(({ href, label, icon: Icon }) => {
-            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+        <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5 overflow-y-auto" aria-label="Navegação principal">
+          {/* Primary nav */}
+          {navItems.map(({ href, label, icon: Icon, highlight }) => {
+            const active = isActive(href);
             return (
               <Link
                 key={href}
@@ -88,7 +97,39 @@ export function Sidebar({ companyName, mobileOpen, onMobileClose }: SidebarProps
                 className={cn(
                   "flex items-center gap-3 px-3 h-10 rounded-[var(--radius-md)] text-sm font-medium transition-colors duration-150",
                   active
-                    ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)]"
+                    ? "bg-[var(--color-sidebar-active)] text-white"
+                    : highlight
+                    ? "text-white bg-[var(--color-primary)]/20 hover:bg-[var(--color-primary)]/30"
+                    : "text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-white"
+                )}
+              >
+                <Icon size={17} />
+                {label}
+                {highlight && !active && (
+                  <span className="ml-auto text-[10px] font-bold bg-[var(--color-primary)] text-white px-1.5 py-0.5 rounded-full">
+                    PDV
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+
+          {/* Divider */}
+          <div className="my-2 border-t border-white/10" />
+
+          {/* Secondary nav */}
+          {secondaryItems.map(({ href, label, icon: Icon }) => {
+            const active = isActive(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={onMobileClose}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex items-center gap-3 px-3 h-10 rounded-[var(--radius-md)] text-sm font-medium transition-colors duration-150",
+                  active
+                    ? "bg-[var(--color-sidebar-active)] text-white"
                     : "text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-white"
                 )}
               >
@@ -99,7 +140,6 @@ export function Sidebar({ companyName, mobileOpen, onMobileClose }: SidebarProps
           })}
         </nav>
 
-        {/* Logout */}
         <div className="px-3 pb-4">
           <button
             onClick={handleLogout}
