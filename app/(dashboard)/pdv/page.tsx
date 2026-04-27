@@ -34,7 +34,8 @@ export default function PDVPage() {
   const [discount, setDiscount] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const [lastSale, setLastSale] = useState<{ total: number; method: string } | null>(null);
+  const [lastSale, setLastSale] = useState<{ total: number; method: string; troco?: number } | null>(null);
+  const [cashReceived, setCashReceived] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -83,6 +84,7 @@ export default function PDVPage() {
     setDiscount("");
     setNote("");
     setPaymentMethod(null);
+    setCashReceived("");
     setScreen("pos");
   }
 
@@ -91,17 +93,33 @@ export default function PDVPage() {
   const total = Math.max(subtotal - discountValue, 0);
   const itemCount = cart.reduce((s, i) => s + i.quantity, 0);
 
+  const cashReceivedValue = parseFloat(cashReceived || "0") || 0;
+  const troco = paymentMethod === "dinheiro" ? Math.max(cashReceivedValue - total, 0) : 0;
+  const cashInvalid = paymentMethod === "dinheiro" && cashReceivedValue < total && cashReceived !== "";
+
   async function confirmSale() {
     if (!paymentMethod || cart.length === 0) return;
+    if (paymentMethod === "dinheiro" && cashReceived !== "" && cashReceivedValue < total) {
+      toast("error", "Valor recebido é menor que o total.");
+      return;
+    }
+
     setSaving(true);
 
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    const { data: sale, error } = await supabase
+    if (authError || !user) {
+      toast("error", "Sessão expirada. Faça login novamente.");
+      setSaving(false);
+      return;
+    }
+
+    // 1. Insert sale
+    const { data: sale, error: saleError } = await supabase
       .from("sales")
       .insert({
-        company_id: user?.id,
+        company_id: user.id,
         payment_method: paymentMethod,
         total,
         discount: discountValue,
@@ -111,13 +129,15 @@ export default function PDVPage() {
       .select()
       .single();
 
-    if (error || !sale) {
-      toast("error", "Erro ao registrar venda.");
+    if (saleError || !sale) {
+      console.error("Sale insert error:", saleError);
+      toast("error", `Erro ao registrar venda: ${saleError?.message ?? "erro desconhecido"}`);
       setSaving(false);
       return;
     }
 
-    await supabase.from("sale_items").insert(
+    // 2. Insert sale items
+    const { error: itemsError } = await supabase.from("sale_items").insert(
       cart.map((i) => ({
         sale_id: sale.id,
         product_id: i.product.id,
@@ -128,7 +148,14 @@ export default function PDVPage() {
       }))
     );
 
-    // Deduct stock for each product
+    if (itemsError) {
+      console.error("Sale items insert error:", itemsError);
+      toast("error", `Erro ao salvar itens: ${itemsError.message}`);
+      setSaving(false);
+      return;
+    }
+
+    // 3. Deduct stock
     for (const item of cart) {
       await supabase
         .from("products")
@@ -136,9 +163,9 @@ export default function PDVPage() {
         .eq("id", item.product.id);
     }
 
-    // Also record as cash entrada
+    // 4. Record as cash entrada
     await supabase.from("cash_transactions").insert({
-      company_id: user?.id,
+      company_id: user.id,
       type: "entrada",
       category: "Venda de produtos",
       description: `Venda PDV — ${PAYMENT_METHODS.find(m => m.key === paymentMethod)?.label}`,
@@ -146,7 +173,8 @@ export default function PDVPage() {
       date: localToday(),
     });
 
-    setLastSale({ total, method: PAYMENT_METHODS.find(m => m.key === paymentMethod)?.label || "" });
+    const trocoFinal = paymentMethod === "dinheiro" && cashReceivedValue > total ? cashReceivedValue - total : undefined;
+    setLastSale({ total, method: PAYMENT_METHODS.find(m => m.key === paymentMethod)?.label || "", troco: trocoFinal });
     setSaving(false);
     setScreen("success");
   }
@@ -157,15 +185,24 @@ export default function PDVPage() {
       <div className="flex-1 flex flex-col">
         <Header title="PDV" onMenuClick={openMenu} />
         <div className="flex-1 flex items-center justify-center p-6">
-          <div className="flex flex-col items-center text-center max-w-sm">
+          <div className="flex flex-col items-center text-center max-w-sm w-full">
             <div className="w-20 h-20 rounded-full bg-[var(--color-success-subtle)] flex items-center justify-center mb-6">
               <Check size={40} className="text-[var(--color-success)]" />
             </div>
             <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-1">Venda concluída!</h2>
             <p className="text-[var(--color-text-muted)] mb-2">Pagamento via {lastSale.method}</p>
-            <p className="text-4xl font-bold tabular-nums text-[var(--color-success)] mb-8">
+            <p className="text-4xl font-bold tabular-nums text-[var(--color-success)] mb-4">
               {formatCurrency(lastSale.total)}
             </p>
+            {lastSale.troco !== undefined && lastSale.troco > 0 && (
+              <div className="w-full mb-8 rounded-[var(--radius-lg)] bg-[var(--color-surface-elevated)] border border-[var(--color-border)] px-5 py-4">
+                <p className="text-sm text-[var(--color-text-muted)] mb-1">Troco</p>
+                <p className="text-3xl font-bold tabular-nums text-[var(--color-warning)]">
+                  {formatCurrency(lastSale.troco)}
+                </p>
+              </div>
+            )}
+            {(!lastSale.troco || lastSale.troco === 0) && <div className="mb-8" />}
             <Button size="lg" onClick={clearCart} className="w-full">
               Nova venda
             </Button>
@@ -200,7 +237,7 @@ export default function PDVPage() {
             {PAYMENT_METHODS.map(({ key, label, icon: Icon, color }) => (
               <button
                 key={key}
-                onClick={() => setPaymentMethod(key)}
+                onClick={() => { setPaymentMethod(key); setCashReceived(""); }}
                 className={`flex flex-col items-center justify-center gap-3 h-28 rounded-[var(--radius-xl)] border-2 transition-all duration-150 ${
                   paymentMethod === key
                     ? "border-[var(--color-primary)] bg-[var(--color-primary-subtle)] shadow-[var(--shadow-elevated)]"
@@ -218,7 +255,44 @@ export default function PDVPage() {
             ))}
           </div>
 
-          {/* Optional discount + note */}
+          {/* Cash received + troco (only for dinheiro) */}
+          {paymentMethod === "dinheiro" && (
+            <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] p-4 flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-[var(--color-text-primary)]">Valor recebido</span>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3 text-sm text-[var(--color-text-muted)] pointer-events-none">R$</span>
+                  <input
+                    type="number"
+                    min={total}
+                    step="0.01"
+                    placeholder={total.toFixed(2).replace(".", ",")}
+                    value={cashReceived}
+                    onChange={(e) => setCashReceived(e.target.value)}
+                    autoFocus
+                    className={`w-36 h-10 pl-9 pr-3 text-sm font-semibold rounded-[var(--radius-md)] border bg-[var(--color-bg)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 transition-colors ${
+                      cashInvalid
+                        ? "border-[var(--color-danger)] focus:border-[var(--color-danger)] focus:ring-[var(--color-danger)]/20"
+                        : "border-[var(--color-border)] focus:border-[var(--color-primary)] focus:ring-[var(--color-primary)]/20"
+                    }`}
+                  />
+                </div>
+              </div>
+              {cashInvalid && (
+                <p className="text-xs text-[var(--color-danger)]">Valor recebido menor que o total ({formatCurrency(total)})</p>
+              )}
+              {cashReceived !== "" && !cashInvalid && (
+                <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)]">
+                  <span className="text-sm text-[var(--color-text-muted)]">Troco</span>
+                  <span className={`text-xl font-bold tabular-nums ${troco > 0 ? "text-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`}>
+                    {formatCurrency(troco)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Discount + note */}
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Tag size={15} className="text-[var(--color-text-muted)]" />
@@ -247,12 +321,12 @@ export default function PDVPage() {
 
           {/* Actions */}
           <div className="flex gap-3 mt-auto">
-            <Button variant="secondary" onClick={() => setScreen("pos")} className="flex-1">
+            <Button variant="secondary" onClick={() => { setScreen("pos"); setCashReceived(""); }} className="flex-1">
               Voltar
             </Button>
             <Button
               onClick={confirmSale}
-              disabled={!paymentMethod}
+              disabled={!paymentMethod || cashInvalid}
               loading={saving}
               className="flex-1"
               size="lg"
