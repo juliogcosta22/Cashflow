@@ -11,7 +11,7 @@ import { Input, Select, Textarea } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, localToday } from "@/lib/utils";
 import type { CashTransaction } from "@/types";
 import { Plus, Wallet, ArrowUpRight, ArrowDownRight, Trash2, Filter } from "lucide-react";
 
@@ -67,7 +67,7 @@ export default function CaixaPage() {
     category: "",
     description: "",
     amount: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: localToday(),
   });
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -106,7 +106,7 @@ export default function CaixaPage() {
       category: "",
       description: "",
       amount: "",
-      date: new Date().toISOString().slice(0, 10),
+      date: localToday(),
     });
     setFormError(null);
     setModalOpen(true);

@@ -11,7 +11,7 @@ import { Input, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, localToday } from "@/lib/utils";
 import type { Product, StockMovement, ProductComponent } from "@/types";
 import {
   Plus, Package, ArrowUpRight, ArrowDownRight, Pencil,
@@ -75,7 +75,7 @@ export default function EstoquePage() {
     quantity: "",
     unit_cost: "",
     reason: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: localToday(),
   });
 
   const [formError, setFormError] = useState<string | null>(null);
@@ -168,7 +168,7 @@ export default function EstoquePage() {
       quantity: "",
       unit_cost: product.cost_price.toString(),
       reason: "",
-      date: new Date().toISOString().slice(0, 10),
+      date: localToday(),
     });
     setFormError(null);
     setModal("movement");

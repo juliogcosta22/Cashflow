@@ -73,8 +73,9 @@ export default function DashboardPage() {
       const months: { month: string; Entradas: number; Saídas: number }[] = [];
       for (let i = 5; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const start = d.toISOString().slice(0, 7) + "-01";
-        const end = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+        const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+        const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        const end = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, "0")}-${String(lastDay.getDate()).padStart(2, "0")}`;
         const label = d.toLocaleDateString("pt-BR", { month: "short" });
         const { data: mt } = await supabase
           .from("cash_transactions")

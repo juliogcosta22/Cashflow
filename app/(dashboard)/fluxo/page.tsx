@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { createClient } from "@/lib/supabase/client";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, localToday } from "@/lib/utils";
 import type { Sale, SaleItem, CashTransaction } from "@/types";
 import {
   BarChart2, Banknote, CreditCard, Smartphone, Wallet,
@@ -47,16 +47,19 @@ interface DayGroup {
   totalSales: number;
 }
 
+function localDateOffset(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function dateRange(period: Period, from: string, to: string): { start: string; end: string } {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   switch (period) {
     case "today":
       return { start: today, end: today };
-    case "week": {
-      const d = new Date();
-      d.setDate(d.getDate() - 6);
-      return { start: d.toISOString().slice(0, 10), end: today };
-    }
+    case "week":
+      return { start: localDateOffset(-6), end: today };
     case "month": {
       const d = new Date();
       const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
@@ -70,8 +73,8 @@ function dateRange(period: Period, from: string, to: string): { start: string; e
 export default function FluxoPage() {
   const openMenu = useMobileMenu();
   const [period, setPeriod] = useState<Period>("today");
-  const [customFrom, setCustomFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [customTo, setCustomTo] = useState(new Date().toISOString().slice(0, 10));
+  const [customFrom, setCustomFrom] = useState(localToday);
+  const [customTo, setCustomTo] = useState(localToday);
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<DayGroup[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -125,7 +128,7 @@ export default function FluxoPage() {
     setGroups(result);
 
     // Auto-expand today
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     if (result.some(g => g.date === today)) {
       setExpanded(new Set([today]));
     }
@@ -277,7 +280,7 @@ export default function FluxoPage() {
           <div className="flex flex-col gap-3">
             {groups.map((group) => {
               const isOpen = expanded.has(group.date);
-              const isToday = group.date === new Date().toISOString().slice(0, 10);
+              const isToday = group.date === localToday();
               const dayBalance = group.totalIncome - group.totalExpense;
 
               return (
@@ -285,15 +288,16 @@ export default function FluxoPage() {
                   {/* Day header */}
                   <button
                     onClick={() => toggleExpand(group.date)}
-                    className="w-full flex items-center justify-between px-5 py-4 hover:bg-[var(--color-surface-elevated)] rounded-[var(--radius-lg)] transition-colors duration-100"
+                    className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-4 hover:bg-[var(--color-surface-elevated)] rounded-[var(--radius-lg)] transition-colors duration-100 text-left"
                   >
-                    <div className="flex items-center gap-3">
+                    {/* Date + count */}
+                    <div className="flex items-center gap-3 min-w-0">
                       {isOpen
-                        ? <ChevronDown size={16} className="text-[var(--color-text-muted)]" />
-                        : <ChevronRight size={16} className="text-[var(--color-text-muted)]" />
+                        ? <ChevronDown size={16} className="text-[var(--color-text-muted)] flex-shrink-0" />
+                        : <ChevronRight size={16} className="text-[var(--color-text-muted)] flex-shrink-0" />
                       }
-                      <div className="text-left">
-                        <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
                           {isToday ? "Hoje — " : ""}{formatDate(group.date)}
                         </p>
                         <p className="text-xs text-[var(--color-text-muted)]">
@@ -302,23 +306,24 @@ export default function FluxoPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-6 text-right">
-                      <div>
-                        <p className="text-xs text-[var(--color-text-muted)]">Entradas</p>
-                        <p className="text-sm font-bold tabular-nums text-[var(--color-income)]">
+                    {/* Financials — grid on mobile so all 3 fit */}
+                    <div className="grid grid-cols-3 sm:flex sm:items-center sm:gap-6 gap-2 pl-7 sm:pl-0">
+                      <div className="text-left sm:text-right">
+                        <p className="text-[10px] sm:text-xs text-[var(--color-text-muted)]">Entradas</p>
+                        <p className="text-xs sm:text-sm font-bold tabular-nums text-[var(--color-income)] truncate">
                           +{formatCurrency(group.totalIncome)}
                         </p>
                       </div>
-                      <div>
-                        <p className="text-xs text-[var(--color-text-muted)]">Saídas</p>
-                        <p className="text-sm font-bold tabular-nums text-[var(--color-expense)]">
+                      <div className="text-left sm:text-right">
+                        <p className="text-[10px] sm:text-xs text-[var(--color-text-muted)]">Saídas</p>
+                        <p className="text-xs sm:text-sm font-bold tabular-nums text-[var(--color-expense)] truncate">
                           -{formatCurrency(group.totalExpense)}
                         </p>
                       </div>
-                      <div>
-                        <p className="text-xs text-[var(--color-text-muted)]">Saldo</p>
+                      <div className="text-left sm:text-right">
+                        <p className="text-[10px] sm:text-xs text-[var(--color-text-muted)]">Saldo</p>
                         <p
-                          className="text-sm font-bold tabular-nums"
+                          className="text-xs sm:text-sm font-bold tabular-nums truncate"
                           style={{ color: dayBalance >= 0 ? "var(--color-income)" : "var(--color-expense)" }}
                         >
                           {formatCurrency(dayBalance)}

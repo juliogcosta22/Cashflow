@@ -5,7 +5,7 @@ import { Header } from "@/components/layout/header";
 import { useMobileMenu } from "@/lib/mobile-menu-context";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, localToday } from "@/lib/utils";
 import type { Product, CartItem, PaymentMethod } from "@/types";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, Check,
@@ -106,7 +106,7 @@ export default function PDVPage() {
         total,
         discount: discountValue,
         note: note || null,
-        date: new Date().toISOString().slice(0, 10),
+        date: localToday(),
       })
       .select()
       .single();
@@ -143,7 +143,7 @@ export default function PDVPage() {
       category: "Venda de produtos",
       description: `Venda PDV — ${PAYMENT_METHODS.find(m => m.key === paymentMethod)?.label}`,
       amount: total,
-      date: new Date().toISOString().slice(0, 10),
+      date: localToday(),
     });
 
     setLastSale({ total, method: PAYMENT_METHODS.find(m => m.key === paymentMethod)?.label || "" });
