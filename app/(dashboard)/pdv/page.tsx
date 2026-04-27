@@ -9,74 +9,137 @@ import { formatCurrency, localToday } from "@/lib/utils";
 import type { Product, CartItem, PaymentMethod } from "@/types";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, Check,
-  Banknote, CreditCard, Smartphone, Wallet, X, Tag,
+  Banknote, CreditCard, Smartphone, Wallet, X, Tag, Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+// ── Constants ──────────────────────────────────────────────────────────────────
+
 const PAYMENT_METHODS: { key: PaymentMethod; label: string; icon: React.ElementType; color: string }[] = [
-  { key: "dinheiro", label: "Dinheiro", icon: Banknote, color: "#059669" },
-  { key: "pix",      label: "PIX",      icon: Smartphone, color: "#7c3aed" },
-  { key: "debito",   label: "Débito",   icon: CreditCard, color: "#2563eb" },
-  { key: "credito",  label: "Crédito",  icon: Wallet,     color: "#d97706" },
+  { key: "dinheiro", label: "Dinheiro", icon: Banknote,    color: "#059669" },
+  { key: "pix",      label: "PIX",      icon: Smartphone,  color: "#7c3aed" },
+  { key: "debito",   label: "Débito",   icon: CreditCard,  color: "#2563eb" },
+  { key: "credito",  label: "Crédito",  icon: Wallet,      color: "#d97706" },
 ];
 
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+interface PDVComponent {
+  id: string;
+  parent_product_id: string;
+  component_product_id: string;
+  quantity: number;
+  component: {
+    id: string;
+    name: string;
+    stock_quantity: number;
+    unit: string;
+  } | null;
+}
+
 type Screen = "pos" | "payment" | "success";
+
+// ── Component ──────────────────────────────────────────────────────────────────
 
 export default function PDVPage() {
   const openMenu = useMobileMenu();
   const { toast } = useToast();
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [search, setSearch] = useState("");
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [screen, setScreen] = useState<Screen>("pos");
+  const [products, setProducts]       = useState<Product[]>([]);
+  const [componentMap, setComponentMap] = useState<Record<string, PDVComponent[]>>({});
+  const [search, setSearch]           = useState("");
+  const [cart, setCart]               = useState<CartItem[]>([]);
+  const [screen, setScreen]           = useState<Screen>("pos");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
-  const [discount, setDiscount] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [lastSale, setLastSale] = useState<{ total: number; method: string; troco?: number } | null>(null);
+  const [discount, setDiscount]       = useState("");
+  const [note, setNote]               = useState("");
+  const [saving, setSaving]           = useState(false);
   const [cashReceived, setCashReceived] = useState("");
+  const [lastSale, setLastSale]       = useState<{ total: number; method: string; troco?: number } | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("products")
-        .select("*")
-        .gt("sale_price", 0)
-        .order("name");
-      setProducts(data || []);
-    }
-    load();
+  // ── Load ──────────────────────────────────────────────────────────────────────
+
+  const loadProducts = useCallback(async () => {
+    const supabase = createClient();
+
+    // Only produtos (not insumos) appear in PDV
+    const { data: prods } = await supabase
+      .from("products")
+      .select("*")
+      .eq("product_type", "produto")
+      .gt("sale_price", 0)
+      .order("name");
+
+    const prodList = prods || [];
+    setProducts(prodList);
+
+    if (prodList.length === 0) return;
+
+    // Fetch components so we can compute effective stock and deduct correctly
+    const { data: compsData } = await supabase
+      .from("product_components")
+      .select("id, parent_product_id, component_product_id, quantity, component:component_product_id(id,name,stock_quantity,unit)")
+      .in("parent_product_id", prodList.map((p: Product) => p.id));
+
+    const map: Record<string, PDVComponent[]> = {};
+    (compsData || []).forEach((c: any) => {
+      if (!map[c.parent_product_id]) map[c.parent_product_id] = [];
+      map[c.parent_product_id].push(c as PDVComponent);
+    });
+    setComponentMap(map);
   }, []);
 
-  const filtered = products.filter((p) =>
+  useEffect(() => { loadProducts(); }, [loadProducts]);
+
+  // ── Effective stock ───────────────────────────────────────────────────────────
+
+  function getEffectiveStock(productId: string, ownStock: number): number {
+    const comps = componentMap[productId];
+    if (comps && comps.length > 0) {
+      return Math.floor(Math.min(...comps.map(c =>
+        c.component ? c.component.stock_quantity / c.quantity : 0
+      )));
+    }
+    return ownStock;
+  }
+
+  // ── Cart helpers ──────────────────────────────────────────────────────────────
+
+  const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
     (p.sku || "").toLowerCase().includes(search.toLowerCase())
   );
 
   function addToCart(product: Product) {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.product.id === product.id);
+    const effectiveStock = getEffectiveStock(product.id, product.stock_quantity);
+    setCart(prev => {
+      const existing = prev.find(i => i.product.id === product.id);
+      const currentQty = existing?.quantity ?? 0;
+      if (currentQty >= effectiveStock) return prev; // already at max
       if (existing) {
-        return prev.map((i) =>
-          i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i
-        );
+        return prev.map(i => i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
       }
       return [...prev, { product, quantity: 1 }];
     });
   }
 
   function updateQty(productId: string, delta: number) {
-    setCart((prev) =>
+    const product = products.find(p => p.id === productId);
+    const effectiveStock = product ? getEffectiveStock(productId, product.stock_quantity) : 0;
+    setCart(prev =>
       prev
-        .map((i) => i.product.id === productId ? { ...i, quantity: i.quantity + delta } : i)
-        .filter((i) => i.quantity > 0)
+        .map(i => {
+          if (i.product.id !== productId) return i;
+          const newQty = i.quantity + delta;
+          if (newQty > effectiveStock) return i; // cap at effective stock
+          return { ...i, quantity: newQty };
+        })
+        .filter(i => i.quantity > 0)
     );
   }
 
   function removeFromCart(productId: string) {
-    setCart((prev) => prev.filter((i) => i.product.id !== productId));
+    setCart(prev => prev.filter(i => i.product.id !== productId));
   }
 
   function clearCart() {
@@ -88,14 +151,18 @@ export default function PDVPage() {
     setScreen("pos");
   }
 
-  const subtotal = cart.reduce((s, i) => s + i.product.sale_price * i.quantity, 0);
+  // ── Totals ────────────────────────────────────────────────────────────────────
+
+  const subtotal      = cart.reduce((s, i) => s + i.product.sale_price * i.quantity, 0);
   const discountValue = Math.min(parseFloat(discount || "0"), subtotal);
-  const total = Math.max(subtotal - discountValue, 0);
-  const itemCount = cart.reduce((s, i) => s + i.quantity, 0);
+  const total         = Math.max(subtotal - discountValue, 0);
+  const itemCount     = cart.reduce((s, i) => s + i.quantity, 0);
 
   const cashReceivedValue = parseFloat(cashReceived || "0") || 0;
-  const troco = paymentMethod === "dinheiro" ? Math.max(cashReceivedValue - total, 0) : 0;
-  const cashInvalid = paymentMethod === "dinheiro" && cashReceivedValue < total && cashReceived !== "";
+  const troco             = paymentMethod === "dinheiro" ? Math.max(cashReceivedValue - total, 0) : 0;
+  const cashInvalid       = paymentMethod === "dinheiro" && cashReceived !== "" && cashReceivedValue < total;
+
+  // ── Confirm sale ──────────────────────────────────────────────────────────────
 
   async function confirmSale() {
     if (!paymentMethod || cart.length === 0) return;
@@ -105,7 +172,6 @@ export default function PDVPage() {
     }
 
     setSaving(true);
-
     const supabase = createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -138,32 +204,47 @@ export default function PDVPage() {
 
     // 2. Insert sale items
     const { error: itemsError } = await supabase.from("sale_items").insert(
-      cart.map((i) => ({
-        sale_id: sale.id,
-        product_id: i.product.id,
+      cart.map(i => ({
+        sale_id:      sale.id,
+        product_id:   i.product.id,
         product_name: i.product.name,
-        quantity: i.quantity,
-        unit_price: i.product.sale_price,
-        total: i.product.sale_price * i.quantity,
+        quantity:     i.quantity,
+        unit_price:   i.product.sale_price,
+        total:        i.product.sale_price * i.quantity,
       }))
     );
 
     if (itemsError) {
-      console.error("Sale items insert error:", itemsError);
+      console.error("Sale items error:", itemsError);
       toast("error", `Erro ao salvar itens: ${itemsError.message}`);
       setSaving(false);
       return;
     }
 
-    // 3. Deduct stock
+    // 3. Deduct stock: from insumos if composed, otherwise from the product itself
     for (const item of cart) {
-      await supabase
-        .from("products")
-        .update({ stock_quantity: Math.max(item.product.stock_quantity - item.quantity, 0) })
-        .eq("id", item.product.id);
+      const comps = componentMap[item.product.id];
+      if (comps && comps.length > 0) {
+        // Composed product → deduct from each insumo/component
+        for (const comp of comps) {
+          if (!comp.component) continue;
+          const deductQty = comp.quantity * item.quantity;
+          const newQty    = Math.max(comp.component.stock_quantity - deductQty, 0);
+          await supabase
+            .from("products")
+            .update({ stock_quantity: newQty })
+            .eq("id", comp.component_product_id);
+        }
+      } else {
+        // Simple product → deduct from its own stock
+        await supabase
+          .from("products")
+          .update({ stock_quantity: Math.max(item.product.stock_quantity - item.quantity, 0) })
+          .eq("id", item.product.id);
+      }
     }
 
-    // 4. Record as cash entrada
+    // 4. Record as cash entry
     await supabase.from("cash_transactions").insert({
       company_id: user.id,
       type: "entrada",
@@ -173,13 +254,17 @@ export default function PDVPage() {
       date: localToday(),
     });
 
-    const trocoFinal = paymentMethod === "dinheiro" && cashReceivedValue > total ? cashReceivedValue - total : undefined;
+    const trocoFinal = paymentMethod === "dinheiro" && cashReceivedValue > total
+      ? cashReceivedValue - total
+      : undefined;
+
     setLastSale({ total, method: PAYMENT_METHODS.find(m => m.key === paymentMethod)?.label || "", troco: trocoFinal });
     setSaving(false);
     setScreen("success");
   }
 
-  // ── Success screen ─────────────────────────────────────────
+  // ── Success screen ─────────────────────────────────────────────────────────────
+
   if (screen === "success" && lastSale) {
     return (
       <div className="flex-1 flex flex-col">
@@ -203,16 +288,15 @@ export default function PDVPage() {
               </div>
             )}
             {(!lastSale.troco || lastSale.troco === 0) && <div className="mb-8" />}
-            <Button size="lg" onClick={clearCart} className="w-full">
-              Nova venda
-            </Button>
+            <Button size="lg" onClick={clearCart} className="w-full">Nova venda</Button>
           </div>
         </div>
       </div>
     );
   }
 
-  // ── Payment screen ─────────────────────────────────────────
+  // ── Payment screen ─────────────────────────────────────────────────────────────
+
   if (screen === "payment") {
     return (
       <div className="flex-1 flex flex-col">
@@ -232,11 +316,10 @@ export default function PDVPage() {
             )}
           </div>
 
-          {/* Payment methods */}
+          {/* Payment method grid */}
           <div className="grid grid-cols-2 gap-3">
             {PAYMENT_METHODS.map(({ key, label, icon: Icon, color }) => (
-              <button
-                key={key}
+              <button key={key}
                 onClick={() => { setPaymentMethod(key); setCashReceived(""); }}
                 className={`flex flex-col items-center justify-center gap-3 h-28 rounded-[var(--radius-xl)] border-2 transition-all duration-150 ${
                   paymentMethod === key
@@ -244,10 +327,7 @@ export default function PDVPage() {
                     : "border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-primary)]/50"
                 }`}
               >
-                <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center"
-                  style={{ background: `${color}18` }}
-                >
+                <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: `${color}18` }}>
                   <Icon size={24} style={{ color }} />
                 </div>
                 <span className="text-sm font-semibold text-[var(--color-text-primary)]">{label}</span>
@@ -255,7 +335,7 @@ export default function PDVPage() {
             ))}
           </div>
 
-          {/* Cash received + troco (only for dinheiro) */}
+          {/* Cash received + troco */}
           {paymentMethod === "dinheiro" && (
             <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] p-4 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-3">
@@ -263,12 +343,10 @@ export default function PDVPage() {
                 <div className="relative flex items-center">
                   <span className="absolute left-3 text-sm text-[var(--color-text-muted)] pointer-events-none">R$</span>
                   <input
-                    type="number"
-                    min={total}
-                    step="0.01"
+                    type="number" min={total} step="0.01"
                     placeholder={total.toFixed(2).replace(".", ",")}
                     value={cashReceived}
-                    onChange={(e) => setCashReceived(e.target.value)}
+                    onChange={e => setCashReceived(e.target.value)}
                     autoFocus
                     className={`w-36 h-10 pl-9 pr-3 text-sm font-semibold rounded-[var(--radius-md)] border bg-[var(--color-bg)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 transition-colors ${
                       cashInvalid
@@ -300,21 +378,17 @@ export default function PDVPage() {
               <div className="relative flex items-center ml-auto">
                 <span className="absolute left-3 text-sm text-[var(--color-text-muted)] pointer-events-none">R$</span>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0,00"
+                  type="number" min="0" step="0.01" placeholder="0,00"
                   value={discount}
-                  onChange={(e) => setDiscount(e.target.value)}
+                  onChange={e => setDiscount(e.target.value)}
                   className="w-32 h-9 pl-9 pr-3 text-sm rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-primary)]"
                 />
               </div>
             </div>
             <input
-              type="text"
-              placeholder="Observação (opcional)"
+              type="text" placeholder="Observação (opcional)"
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={e => setNote(e.target.value)}
               className="w-full h-10 px-3 text-sm rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-primary)]"
             />
           </div>
@@ -340,12 +414,14 @@ export default function PDVPage() {
     );
   }
 
-  // ── POS screen ─────────────────────────────────────────────
+  // ── POS screen ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <Header title="PDV" subtitle="Ponto de Venda" onMenuClick={openMenu} />
 
       <div className="flex-1 flex overflow-hidden">
+
         {/* Left: product grid */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Search */}
@@ -356,7 +432,7 @@ export default function PDVPage() {
                 type="search"
                 placeholder="Buscar produto..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={e => setSearch(e.target.value)}
                 autoFocus
                 className="w-full h-10 pl-9 pr-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20"
               />
@@ -371,9 +447,12 @@ export default function PDVPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-                {filtered.map((product) => {
-                  const inCart = cart.find((i) => i.product.id === product.id);
-                  const outOfStock = product.stock_quantity <= 0;
+                {filtered.map(product => {
+                  const effectiveStock = getEffectiveStock(product.id, product.stock_quantity);
+                  const outOfStock     = effectiveStock <= 0;
+                  const inCart         = cart.find(i => i.product.id === product.id);
+                  const isComposed     = (componentMap[product.id]?.length ?? 0) > 0;
+
                   return (
                     <button
                       key={product.id}
@@ -400,12 +479,12 @@ export default function PDVPage() {
                         <span className="text-base font-bold tabular-nums text-[var(--color-primary)]">
                           {formatCurrency(product.sale_price)}
                         </span>
-                        {outOfStock && (
+                        {outOfStock ? (
                           <span className="text-[10px] text-[var(--color-danger)] font-medium">Sem estoque</span>
-                        )}
-                        {!outOfStock && (
-                          <span className="text-[10px] text-[var(--color-text-muted)]">
-                            Estoque: {product.stock_quantity}
+                        ) : (
+                          <span className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-0.5">
+                            {isComposed && <Layers size={9} className="flex-shrink-0" />}
+                            {isComposed ? `~${effectiveStock} disp.` : `Estoque: ${effectiveStock}`}
                           </span>
                         )}
                       </div>
@@ -426,18 +505,12 @@ export default function PDVPage() {
               <span className="text-sm font-semibold text-[var(--color-text-primary)]">
                 Carrinho
                 {itemCount > 0 && (
-                  <span className="ml-1.5 text-xs font-bold text-[var(--color-primary)]">
-                    ({itemCount})
-                  </span>
+                  <span className="ml-1.5 text-xs font-bold text-[var(--color-primary)]">({itemCount})</span>
                 )}
               </span>
             </div>
             {cart.length > 0 && (
-              <button
-                onClick={clearCart}
-                aria-label="Limpar carrinho"
-                className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)] transition-colors"
-              >
+              <button onClick={clearCart} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)] transition-colors">
                 Limpar
               </button>
             )}
@@ -448,52 +521,47 @@ export default function PDVPage() {
             {cart.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-4">
                 <ShoppingCart size={28} className="text-[var(--color-text-muted)]" />
-                <p className="text-sm text-[var(--color-text-muted)]">
-                  Clique nos produtos para adicionar
-                </p>
+                <p className="text-sm text-[var(--color-text-muted)]">Clique nos produtos para adicionar</p>
               </div>
             ) : (
               <div className="divide-y divide-[var(--color-border)]">
-                {cart.map(({ product, quantity }) => (
-                  <div key={product.id} className="px-4 py-3 flex flex-col gap-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-medium text-[var(--color-text-primary)] leading-tight flex-1">
-                        {product.name}
-                      </span>
-                      <button
-                        onClick={() => removeFromCart(product.id)}
-                        aria-label="Remover"
-                        className="text-[var(--color-text-muted)] hover:text-[var(--color-danger)] transition-colors flex-shrink-0"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => updateQty(product.id, -1)}
-                          aria-label="Diminuir"
-                          className="w-7 h-7 rounded-full border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-colors"
-                        >
-                          <Minus size={12} />
-                        </button>
-                        <span className="w-8 text-center text-sm font-bold tabular-nums text-[var(--color-text-primary)]">
-                          {quantity}
+                {cart.map(({ product, quantity }) => {
+                  const effectiveStock = getEffectiveStock(product.id, product.stock_quantity);
+                  return (
+                    <div key={product.id} className="px-4 py-3 flex flex-col gap-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-sm font-medium text-[var(--color-text-primary)] leading-tight flex-1">
+                          {product.name}
                         </span>
-                        <button
-                          onClick={() => updateQty(product.id, 1)}
-                          aria-label="Aumentar"
-                          className="w-7 h-7 rounded-full border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-colors"
-                        >
-                          <Plus size={12} />
+                        <button onClick={() => removeFromCart(product.id)} aria-label="Remover"
+                          className="text-[var(--color-text-muted)] hover:text-[var(--color-danger)] transition-colors flex-shrink-0">
+                          <X size={14} />
                         </button>
                       </div>
-                      <span className="text-sm font-bold tabular-nums text-[var(--color-text-primary)]">
-                        {formatCurrency(product.sale_price * quantity)}
-                      </span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => updateQty(product.id, -1)} aria-label="Diminuir"
+                            className="w-7 h-7 rounded-full border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-colors">
+                            <Minus size={12} />
+                          </button>
+                          <span className="w-8 text-center text-sm font-bold tabular-nums text-[var(--color-text-primary)]">
+                            {quantity}
+                          </span>
+                          <button
+                            onClick={() => updateQty(product.id, 1)}
+                            disabled={quantity >= effectiveStock}
+                            aria-label="Aumentar"
+                            className="w-7 h-7 rounded-full border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                        <span className="text-sm font-bold tabular-nums text-[var(--color-text-primary)]">
+                          {formatCurrency(product.sale_price * quantity)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -506,12 +574,7 @@ export default function PDVPage() {
                 {formatCurrency(subtotal)}
               </span>
             </div>
-            <Button
-              size="lg"
-              className="w-full"
-              disabled={cart.length === 0}
-              onClick={() => setScreen("payment")}
-            >
+            <Button size="lg" className="w-full" disabled={cart.length === 0} onClick={() => setScreen("payment")}>
               Ir para pagamento
             </Button>
           </div>

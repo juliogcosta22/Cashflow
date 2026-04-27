@@ -20,12 +20,15 @@ export interface CashTransaction {
   created_at: string;
 }
 
+export type ProductType = "produto" | "insumo";
+
 export interface Product {
   id: string;
   company_id: string;
   name: string;
   sku: string | null;
   unit: string;
+  product_type: ProductType;
   cost_price: number;
   sale_price: number;
   stock_quantity: number;
