@@ -671,11 +671,11 @@ export default function EstoquePage() {
 
           {/* Composition section — only for produtos */}
           {!isInsumoForm && (
-            <div className="border border-[var(--color-border)] rounded-[var(--radius-lg)] overflow-hidden">
+            <div className="border border-[var(--color-border)] rounded-[var(--radius-lg)]">
               <button
                 type="button"
                 onClick={() => setIsComposed(v => !v)}
-                className="w-full flex items-center justify-between px-4 py-3 bg-[var(--color-surface-elevated)] hover:bg-[var(--color-border)] transition-colors duration-150"
+                className={`w-full flex items-center justify-between px-4 py-3 bg-[var(--color-surface-elevated)] hover:bg-[var(--color-border)] transition-colors duration-150 ${isComposed ? "rounded-t-[var(--radius-lg)]" : "rounded-[var(--radius-lg)]"}`}
               >
                 <div className="flex items-center gap-2">
                   <Layers size={15} className="text-[var(--color-primary)]" />
@@ -752,31 +752,33 @@ export default function EstoquePage() {
                   )}
 
                   {/* Search component */}
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Buscar insumo ou produto para adicionar..."
-                      value={compSearch}
-                      onChange={e => setCompSearch(e.target.value)}
-                      className="w-full h-9 px-3 text-sm rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-primary)]"
-                    />
-                    {compSearch && filteredForComp.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 z-10 mt-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] shadow-[var(--shadow-elevated)] overflow-hidden">
-                        {filteredForComp.map(p => (
-                          <button key={p.id} type="button" onClick={() => addComponent(p)}
-                            className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-[var(--color-surface-elevated)] transition-colors">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm text-[var(--color-text-primary)]">{p.name}</span>
-                              {p.product_type === "insumo" && (
-                                <span className="text-[10px] font-semibold text-[var(--color-warning)] bg-[var(--color-warning-subtle)] px-1 py-0.5 rounded">Insumo</span>
-                              )}
-                            </div>
-                            <span className="text-xs text-[var(--color-text-muted)]">{formatCurrency(p.cost_price)}/{p.unit}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <input
+                    type="text"
+                    placeholder="Buscar insumo ou produto para adicionar..."
+                    value={compSearch}
+                    onChange={e => setCompSearch(e.target.value)}
+                    className="w-full h-9 px-3 text-sm rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-primary)]"
+                  />
+                  {/* Results inline (no absolute positioning — avoids overflow clipping) */}
+                  {compSearch && filteredForComp.length > 0 && (
+                    <div className="border border-[var(--color-border)] rounded-[var(--radius-md)] overflow-hidden">
+                      {filteredForComp.map(p => (
+                        <button key={p.id} type="button" onClick={() => addComponent(p)}
+                          className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-[var(--color-surface-elevated)] transition-colors border-b border-[var(--color-border)] last:border-b-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-[var(--color-text-primary)]">{p.name}</span>
+                            {p.product_type === "insumo" && (
+                              <span className="text-[10px] font-semibold text-[var(--color-warning)] bg-[var(--color-warning-subtle)] px-1 py-0.5 rounded">Insumo</span>
+                            )}
+                          </div>
+                          <span className="text-xs text-[var(--color-text-muted)]">{formatCurrency(p.cost_price)}/{p.unit}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {compSearch && filteredForComp.length === 0 && (
+                    <p className="text-xs text-center text-[var(--color-text-muted)] py-2">Nenhum item encontrado</p>
+                  )}
                 </div>
               )}
             </div>
